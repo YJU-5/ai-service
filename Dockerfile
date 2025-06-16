@@ -14,7 +14,7 @@ COPY main.py .
 
 EXPOSE 8000
 
-ENV S3_BUCKET_NAME=your-model-bucket
+ENV S3_BUCKET_NAME=profanity-filter-model-bucket
 ENV S3_MODEL_KEY=profanity_filter_model.zip
 ENV AWS_DEFAULT_REGION=ap-northeast-2
 
