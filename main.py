@@ -83,6 +83,9 @@ from pydantic import BaseModel
 from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
 import torch
 import os
+import boto3
+import zipfile
+from botocore.exceptions import NoCredentialsError, ClientError
 
 app = FastAPI()
 
@@ -95,10 +98,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# fine-tuned BERT 모델 경로 (너가 저장한 경로로 변경)
-MODEL_PATH = "./profanity_filter_model"  # fine-tuned 모델 경로
-tokenizer = DistilBertTokenizerFast.from_pretrained(MODEL_PATH)
-model = DistilBertForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=2)  # 2개의 레이블: 욕설(1) / 비욕설(0)
+# 모델과 토크나이저를 전역 변수로 선언
+model = None
+tokenizer = None
+
+def download_model_from_s3():
+    """
+    S3에서 모델 파일을 다운로드하는 함수
+    
+    Returns:
+        bool: 다운로드 성공 여부
+    """
+    try:
+        s3 = boto3.client('s3')
+        bucket_name = os.getenv('S3_BUCKET_NAME', 'profanity-filter-model-bucket')
+        model_key = os.getenv('S3_MODEL_KEY', 'profanity_filter_model.zip')
+        local_model_path = './profanity_filter_model'
+        zip_path = './model.zip'
+        
+        # 모델 디렉토리가 이미 존재하는지 확인
+        if os.path.exists(local_model_path) and os.listdir(local_model_path):
+            print("Model already exists locally")
+            return True
+        
+        print(f"Downloading model from S3: s3://{bucket_name}/{model_key}")
+        
+        # S3에서 압축된 모델 파일 다운로드
+        s3.download_file(bucket_name, model_key, zip_path)
+        
+        # 압축 해제
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall('./')
+        
+        # 임시 zip 파일 삭제
+        os.remove(zip_path)
+        
+        print("Model downloaded and extracted successfully")
+        return True
+        
+    except NoCredentialsError:
+        print("AWS credentials not found")
+        return False
+    except ClientError as e:
+        print(f"Error downloading from S3: {e}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return False
+
+def initialize_model():
+    """
+    모델과 토크나이저를 초기화하는 함수
+    
+    Returns:
+        bool: 초기화 성공 여부
+    """
+    global model, tokenizer
+    
+    try:
+        model_path = './profanity_filter_model'
+        
+        # S3에서 모델 다운로드 시도 (로컬에 없는 경우)
+        if not os.path.exists(model_path) or not os.listdir(model_path):
+            if not download_model_from_s3():
+                raise Exception("Failed to download model from S3")
+        
+        # 모델과 토크나이저 로드
+        tokenizer = DistilBertTokenizerFast.from_pretrained(model_path)
+        model = DistilBertForSequenceClassification.from_pretrained(model_path, num_labels=2)
+        
+        print("Model and tokenizer loaded successfully")
+        return True
+        
+    except Exception as e:
+        print(f"Error initializing model: {e}")
+        return False
+
+# 애플리케이션 시작 시 모델 초기화
+@app.on_event("startup")
+async def startup_event():
+    if not initialize_model():
+        raise Exception("Failed to initialize model")
 
 # API 요청 데이터 모델 정의
 class TextRequest(BaseModel):
@@ -118,6 +198,9 @@ async def predict(request: TextRequest):
             "confidence": float    # 예측 신뢰도 (0.0 ~ 1.0)
         }
     """
+    if model is None or tokenizer is None:
+        raise HTTPException(status_code=500, detail="Model not initialized")
+    
     try:
         # 텍스트를 모델이 이해할 수 있는 형태로 변환
         inputs = tokenizer(
@@ -147,7 +230,7 @@ async def health_check():
     """
     서버 상태 확인용 엔드포인트
     """
-    return {"status": "healthy"}
+    return {"status": "healthy", "model_loaded": model is not None}
 
 if __name__ == "__main__":
     import uvicorn
