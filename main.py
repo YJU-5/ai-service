@@ -113,7 +113,7 @@ def download_model_from_s3():
         s3 = boto3.client('s3')
         # 기존 버킷 사용 시: leteatgo-s3-bucket/models/profanity_filter_model.zip
         # 새 버킷 사용 시: profanity-filter-model-bucket/profanity_filter_model.zip
-        bucket_name = os.getenv('S3_BUCKET_NAME', 'leteatgo-photo-album')
+        bucket_name = os.getenv('S3_BUCKET_NAME', 'profanity-filter-model-bucket')
         model_key = os.getenv('S3_MODEL_KEY', 'models/profanity_filter_model.zip')
         local_model_path = './profanity_filter_model'
         zip_path = './model.zip'
