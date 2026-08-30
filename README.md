@@ -1,5 +1,7 @@
 # Let Eat Go AI Service
 
+**English** | [日本語](README.ja.md)
+
 > Let Eat Goのコミュニティ機能を支えるDistilBERTテキスト分類API
 
 <p align="center">
